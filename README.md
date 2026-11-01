@@ -30,3 +30,15 @@ uv run python scripts/collect_jpx_listed.py disclosures    # 会社ごとの開�
 | `data/jpx_listed/company_meta.jsonl` | 会社ごとの上場廃止日と開示の件数 |
 
 2つのサイトの開示は、PDF のファイル名 (`doc_id`) が同じ番号なので突き合わせられる。
+
+## ふるい分け
+
+集めた一覧に、題名の決まり文句で種類を付け、ふるい分け (訂正・種類・普通の株か・同じ日の束ね) を当てる。落としたものも理由付きで全部残す。決まりは [src/alchemy_stock/screening.py](src/alchemy_stock/screening.py)、種類の一覧と件数は [docs/PLAN.md](docs/PLAN.md) §3。
+
+```bash
+uv run python scripts/screen_disclosures.py
+```
+
+| 保存先 | 中身 |
+|---|---|
+| `data/screened/disclosures.jsonl` | 開示ごとの種類・落とした理由 (`dropped_by`、通過は空)・束ね先 (`event_id`)・決まりの版 |
