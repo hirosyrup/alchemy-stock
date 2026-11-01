@@ -7,3 +7,12 @@ __pycache__/
 .pytest_cache/
 .env
 .claude/settings.local.json
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform.lock.hcl
+tfplan
