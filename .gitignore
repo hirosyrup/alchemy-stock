@@ -1,0 +1,9 @@
+# 取得したデータは公開しない (東証データの規約・開示 PDF の著作権)
+data/
+
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.claude/settings.local.json
