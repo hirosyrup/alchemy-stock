@@ -19,3 +19,17 @@ def test_mask_names_code_years():
     assert "XXXX" in got and "13,010" in got
     assert "2019" not in got and "令和" not in got and "平成" not in got
     assert "X年3月期" in got and "X/11/08" in got and "FYX" in got
+
+
+def test_mask_contacts_and_split_years():
+    names = name_variants("NOK株式会社", None)
+    text = clean("各位\n上場会社名 NOK 株式会社 代表者 取締役社長 土居 清志 (コード番号 7240) 問合せ先責任者 広報部部長 加来 隆志 (TEL 03-6891-0191)\n# 業績予想の修正に関するお知らせ\n2020 `年` 3 `月期` https://www.nok.co.jp/")
+    got = mask(text, names, "72400")
+    for leak in ("NOK", "土居", "加来", "6891", "2020", "nok.co.jp", "7240"):
+        assert leak not in got
+    assert "X 年 3 月期" in got
+
+
+def test_drop_header_keeps_title():
+    got = mask("各位\n会社名 当社 問合せ先 辻本 拓 (TEL 07 5-6 9 2-0)\n# 業績予想の修正に関するお知らせ\n本文", [], "99990")
+    assert got.startswith("# 業績予想の修正に関するお知らせ") and "辻本" not in got
