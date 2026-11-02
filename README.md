@@ -42,3 +42,19 @@ uv run python scripts/screen_disclosures.py
 | 保存先 | 中身 |
 |---|---|
 | `data/screened/disclosures.jsonl` | 開示ごとの種類・落とした理由 (`dropped_by`、通過は空)・束ね先 (`event_id`)・決まりの版 |
+
+## BigQuery に入れる
+
+手元の一覧を gzip した JSONL で `gs://alchemy-stock-513407-raw/lists/` に置き、BigQuery の `alchemy-stock-513407.disclosures` に読み込む。表は毎回まるごと作り直す。`gcloud auth application-default login` 済みであること。
+
+```bash
+uv run python scripts/load_bigquery.py                  # 全部
+uv run python scripts/load_bigquery.py screened         # ふるい分けの結果だけ
+```
+
+| 表 | 元 |
+|---|---|
+| `jpx_companies` | 会社の一覧 + 上場廃止日・開示の件数 |
+| `jpx_disclosures` | 東証上場会社情報サービスの開示 (1つの開示が2つの区分に載ると2行) |
+| `tdnet_disclosures` | TDnet の開示 (時刻つき) |
+| `screened_disclosures` | ふるい分けの結果 |
