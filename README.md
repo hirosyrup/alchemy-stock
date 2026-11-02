@@ -31,6 +31,20 @@ uv run python scripts/collect_jpx_listed.py disclosures    # 会社ごとの開�
 
 2つのサイトの開示は、PDF のファイル名 (`doc_id`) が同じ番号なので突き合わせられる。
 
+## 株価と銘柄の一覧を集める (J-Quants)
+
+[J-Quants](https://jpx-jquants.com/) (JPX 公式) の API から、日ごとの全銘柄 (上場廃止した銘柄も含む) の日足と、銘柄の一覧 (貸借の区分つき) を取る。API キーはリポジトリ直下の `.env` に `JQUANTS_API_KEY=...` で入れる。規約上、取ったデータは自分だけで使い、解約したら消す。
+
+```bash
+uv run python scripts/collect_jquants.py bars      # 日足 (10年前から今日まで)
+uv run python scripts/collect_jquants.py master    # 銘柄の一覧
+```
+
+| 保存先 | 中身 |
+|---|---|
+| `data/jquants/bars/YYYY/YYYY-MM-DD.jsonl.gz` | その日の全銘柄の日足 (補正前・補正後の値段、売買代金、時価総額、値幅制限) |
+| `data/jquants/master/YYYY/YYYY-MM-DD.jsonl.gz` | その日時点の全銘柄 (市場・業種・規模・貸借の区分) |
+
 ## ふるい分け
 
 集めた一覧に、題名の決まり文句で種類を付け、ふるい分け (訂正・種類・普通の株か・同じ日の束ね) を当てる。落としたものも理由付きで全部残す。決まりは [src/alchemy_stock/screening.py](src/alchemy_stock/screening.py)、種類の一覧と件数は [docs/PLAN.md](docs/PLAN.md) §3。
