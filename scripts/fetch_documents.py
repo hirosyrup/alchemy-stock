@@ -20,43 +20,11 @@ import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from alchemy_stock.dest import open_dest  # noqa: E402
 from alchemy_stock.http import Blocked, PoliteSession  # noqa: E402
 from alchemy_stock.store import read_jsonl  # noqa: E402
 
 DATA = Path("data")
-
-
-class LocalDest:
-    def __init__(self, root: Path):
-        self.root = root
-
-    def exists(self, name: str) -> bool:
-        return (self.root / name).exists()
-
-    def save(self, name: str, content: bytes) -> None:
-        path = self.root / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_bytes(content)
-        tmp.replace(path)
-
-
-class GcsDest:
-    """GCS のバケットに置く。何があるかは最初に1回だけ一覧を取って覚えておく。"""
-
-    def __init__(self, url: str):
-        from google.cloud import storage
-
-        self.bucket = storage.Client().bucket(url.removeprefix("gs://").strip("/"))
-        self.names = {b.name for prefix in ("pdf/", "xbrl/") for b in self.bucket.list_blobs(prefix=prefix)}
-
-    def exists(self, name: str) -> bool:
-        return name in self.names
-
-    def save(self, name: str, content: bytes) -> None:
-        content_type = "application/pdf" if name.endswith(".pdf") else "text/html"
-        self.bucket.blob(name).upload_from_string(content, content_type=content_type)
-        self.names.add(name)
 
 
 def read_targets(src: str) -> list[dict]:
@@ -122,7 +90,7 @@ def worker(jobs: list[tuple[str, str]], dest, interval: float, progress: Progres
             print(f"  見つからない: {url}", flush=True)
             progress.add(None)
             continue
-        dest.save(name, res.content)
+        dest.save(name, res.content, "application/pdf" if name.endswith(".pdf") else "text/html")
         progress.add(len(res.content))
 
 
@@ -138,7 +106,7 @@ def main() -> None:
 
     targets = read_targets(args.targets)
     urls = with_urls(targets)
-    dest = GcsDest(args.dest) if args.dest.startswith("gs://") else LocalDest(Path(args.dest))
+    dest = open_dest(args.dest, prefixes=("pdf/", "xbrl/"))
     jobs = []
     for doc_id, r in sorted(urls.items()):
         jobs.append((r["pdf_url"], f"pdf/{r['date'][:4]}/{doc_id}.pdf"))

@@ -14,7 +14,7 @@ uv run pytest
 取ったデータは `data/` に保存され、Git には入らない (公開しない)。どちらも1回の読み込みごとに3秒あけ、拒否されたら止まる。止まっても同じコマンドで続きから再開できる。
 
 ```bash
-# TDnet: 直近31日分 (時刻つき)。毎日1回動かす
+# TDnet: 直近31日分 (時刻つき)。毎日1回動かす (本番は Cloud Run のジョブが毎日 23:30 に GCS の tdnet/ に貯める)
 uv run python scripts/collect_tdnet.py
 
 # 東証上場会社情報サービス: 全社の10年分 (日付のみ)
@@ -64,7 +64,7 @@ uv run python scripts/screen_disclosures.py
 ```bash
 uv run python scripts/liquidity_table.py          # 基準ごとに何件残るかの表
 uv run python scripts/make_document_targets.py    # 対象の一覧 → data/targets/documents_v1.jsonl
-./cloud/fetch_documents.sh                        # 一覧を GCS に置き、イメージを作ってジョブを更新
+./cloud/fetch_documents.sh                        # 一覧を GCS に置き、イメージを作ってジョブを更新 (イメージは cloud/build_image.sh)
 gcloud run jobs execute fetch-documents --project alchemy-stock-513407 --region us-central1
 ```
 
