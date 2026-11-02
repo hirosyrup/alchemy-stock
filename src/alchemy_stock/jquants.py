@@ -3,7 +3,8 @@
 - 認証は API キー。リポジトリ直下の .env の JQUANTS_API_KEY を読む (.env は Git に入らない)
 - 回数の上限はプランごとに1分あたり 無料 5 / ライト 60 / スタンダード 120 回。
   PoliteSession の間隔で上限より遅く回し、429 が返ったら止める
-- 1回で返りきらないときは pagination_key が付くので、それを付けて続きを取る
+- 量の多いものは一括ダウンロード (ライト以上) で取る。過去は月ごと、最近は日ごとの gzip の CSV で、
+  /bulk/list で一覧、/bulk/get で15分だけ有効なダウンロード先を受け取る
 - 取ったデータは自分だけで使う。公開リポジトリや人に見せるページに載せない (規約)
 """
 from __future__ import annotations
@@ -39,11 +40,11 @@ def get_all(session: PoliteSession, path: str, **params) -> list[dict]:
         params = {**params, "pagination_key": j["pagination_key"]}
 
 
-def daily_bars(session: PoliteSession, day: str) -> list[dict]:
-    """その日に売買のあった全銘柄の日足 (上場廃止した銘柄も含む)。休みの日は空。"""
-    return get_all(session, "/equities/bars/daily", date=day)
+def bulk_list(session: PoliteSession, endpoint: str) -> list[dict]:
+    """一括ダウンロードできるファイルの一覧 (Key・Size・LastModified)。endpoint は "/equities/bars/daily" など。"""
+    return get_all(session, "/bulk/list", endpoint=endpoint)
 
 
-def master(session: PoliteSession, day: str) -> list[dict]:
-    """その日時点の全銘柄の一覧 (市場・業種・規模・貸借の区分)。"""
-    return get_all(session, "/equities/master", date=day)
+def bulk_url(session: PoliteSession, key: str) -> str:
+    """ファイルのダウンロード先 (15分だけ有効)。"""
+    return session.get(f"{BASE}/bulk/get", params={"key": key}).json()["url"]

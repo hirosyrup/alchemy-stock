@@ -18,17 +18,28 @@ class FakeSession:
         self.calls = []
 
     def get(self, url, params):
-        self.calls.append(params)
+        self.calls.append((url, params))
+        if url.endswith("/bulk/get"):
+            return FakeResponse({"url": "https://example.com/x.csv.gz"})
         if "pagination_key" not in params:
-            return FakeResponse({"data": [{"Code": "11110"}], "pagination_key": "k1"})
-        return FakeResponse({"data": [{"Code": "22220"}]})
+            return FakeResponse({"data": [{"Key": "a.csv.gz"}], "pagination_key": "k1"})
+        return FakeResponse({"data": [{"Key": "b.csv.gz"}]})
 
 
-def test_get_all_follows_pagination_key():
+def test_bulk_list_follows_pagination_key():
     session = FakeSession()
-    rows = jquants.get_all(session, "/equities/bars/daily", date="2025-06-02")
-    assert [r["Code"] for r in rows] == ["11110", "22220"]
-    assert session.calls == [{"date": "2025-06-02"}, {"date": "2025-06-02", "pagination_key": "k1"}]
+    rows = jquants.bulk_list(session, "/equities/bars/daily")
+    assert [r["Key"] for r in rows] == ["a.csv.gz", "b.csv.gz"]
+    assert [p for _, p in session.calls] == [
+        {"endpoint": "/equities/bars/daily"},
+        {"endpoint": "/equities/bars/daily", "pagination_key": "k1"},
+    ]
+
+
+def test_bulk_url():
+    session = FakeSession()
+    assert jquants.bulk_url(session, "a.csv.gz") == "https://example.com/x.csv.gz"
+    assert session.calls == [(f"{jquants.BASE}/bulk/get", {"key": "a.csv.gz"})]
 
 
 def test_load_api_key(tmp_path):
