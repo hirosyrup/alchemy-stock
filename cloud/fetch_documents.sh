@@ -7,8 +7,6 @@
 #
 #   ./cloud/fetch_documents.sh                                   # 本番の一覧
 #   TARGETS=targets/documents_trial.jsonl ./cloud/fetch_documents.sh   # 少数で試す
-#
-# 最初に1回: gcloud auth configure-docker us-central1-docker.pkg.dev
 # =============================================================================
 set -euo pipefail
 
@@ -17,13 +15,11 @@ REGION=us-central1
 BUCKET=gs://${PROJECT}-raw
 TARGETS=${TARGETS:-targets/documents_v1.jsonl}
 JOB=fetch-documents
-IMAGE=${REGION}-docker.pkg.dev/${PROJECT}/alchemy-stock/fetcher:$(git rev-parse --short HEAD)
 
 cd "$(git rev-parse --show-toplevel)"
 
 gcloud storage cp "data/${TARGETS}" "${BUCKET}/${TARGETS}" --project "${PROJECT}"
-docker build --platform linux/amd64 -f cloud/fetcher/Dockerfile -t "${IMAGE}" .
-docker push "${IMAGE}"
+IMAGE=$(./cloud/build_image.sh | tail -1)
 
 # 3本で取り、それぞれ1秒以上あける (全体で1秒に3回まで)。どれかが拒否されたら全部止まる (PLAN.md §5 のお作法)
 # Cloud Run のジョブは CPU 1 未満にできない。約21万ファイルが約20時間、計算の費用は約¥210 (2026-11-02 見積もり)
@@ -32,6 +28,6 @@ gcloud run jobs deploy "${JOB}" --project "${PROJECT}" --region "${REGION}" \
   --service-account "document-fetcher@${PROJECT}.iam.gserviceaccount.com" \
   --tasks 1 --parallelism 1 --max-retries 0 --task-timeout 168h \
   --cpu 1 --memory 512Mi \
-  --args="${BUCKET}/${TARGETS},--dest,${BUCKET},--xbrl,--interval,1,--workers,3,--progress-every,1000"
+  --args="scripts/fetch_documents.py,${BUCKET}/${TARGETS},--dest,${BUCKET},--xbrl,--interval,1,--workers,3,--progress-every,1000"
 
 echo "動かす: gcloud run jobs execute ${JOB} --project ${PROJECT} --region ${REGION}"
