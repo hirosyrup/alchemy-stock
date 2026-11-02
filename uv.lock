@@ -45,6 +45,8 @@ dependencies = [
     { name = "google-cloud-bigquery" },
     { name = "google-cloud-storage" },
     { name = "lxml" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "requests" },
 ]
 
@@ -65,6 +67,7 @@ requires-dist = [
     { name = "google-cloud-bigquery", specifier = ">=3.47.0" },
     { name = "google-cloud-storage", specifier = ">=3.17.1" },
     { name = "lxml", specifier = ">=5.0" },
+    { name = "numpy", specifier = ">=2.4.6" },
     { name = "requests", specifier = ">=2.31" },
 ]
 
