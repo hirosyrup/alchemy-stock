@@ -136,15 +136,20 @@ def build(con: duckdb.DuckDBPyConnection) -> None:
     """)
 
 
-def trades(con, cand: str, side: int) -> list[tuple[date, float]]:
-    """(入った日, コスト前の成績) の一覧。対象のふるい分けと入れない日を当てたあと。"""
+def eligible(side: int) -> str:
+    """tr から、対象のふるい分けと入れない日を当てる条件 (cand は ? で渡す)。"""
     blocked = "ul = '1' and o = h" if side > 0 else "ll = '1' and o = l"
     short = "and mrgn = '2'" if side < 0 else ""
+    return f"""cand = ? and prod = '011' and mkt not in ('0105', '0109') and adv >= {MIN_ADV}
+          and o > 0 and c > 0 and not ({blocked}) {short}"""
+
+
+def trades(con, cand: str, side: int) -> list[tuple[date, float]]:
+    """(入った日, コスト前の成績) の一覧。対象のふるい分けと入れない日を当てたあと。"""
     return con.execute(f"""
         select entry, {side} * ((c / o - 1) - (tc / to_ - 1)) - {LENDING_FEE if side < 0 else 0}
         from tr
-        where cand = ? and prod = '011' and mkt not in ('0105', '0109') and adv >= {MIN_ADV}
-          and o > 0 and c > 0 and not ({blocked}) {short}
+        where {eligible(side)}
         order by entry, code
     """, [cand]).fetchall()
 
@@ -159,13 +164,13 @@ def daily(days: list[date], rows: list[tuple[date, float]], cost: float) -> np.n
     return np.divide(s, n, out=np.zeros_like(s), where=n > 0)
 
 
-def boot_range(x: np.ndarray, rng: np.random.Generator) -> tuple[float, float]:
+def boot_range(x: np.ndarray, rng: np.random.Generator, block: int = BLOCK, level: float = RANGE) -> tuple[float, float]:
     n = len(x)
-    k = -(-n // BLOCK)
-    starts = rng.integers(0, n - BLOCK + 1, size=(N_BOOT, k))
-    idx = (starts[:, :, None] + np.arange(BLOCK)).reshape(N_BOOT, -1)[:, :n]
+    k = -(-n // block)
+    starts = rng.integers(0, n - block + 1, size=(N_BOOT, k))
+    idx = (starts[:, :, None] + np.arange(block)).reshape(N_BOOT, -1)[:, :n]
     means = x[idx].mean(axis=1)
-    a = (1 - RANGE) / 2
+    a = (1 - level) / 2
     return float(np.quantile(means, a)), float(np.quantile(means, 1 - a))
 
 
