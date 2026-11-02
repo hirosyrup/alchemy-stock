@@ -68,6 +68,20 @@ uv run python scripts/make_document_targets.py    # 対象の一覧 → data/tar
 gcloud run jobs execute fetch-documents --project alchemy-stock-513407 --region us-central1
 ```
 
+## 決算短信の数字を XBRL から取り出す
+
+決算短信の1ページ目 (サマリー) のインライン XBRL から、数字の1つ1つを「項目・期間・区分・値」の縦長の表にする (`src/alchemy_stock/xbrl.py`)。どの数字をどう使うかは検証の宣言文書で決める。
+
+```bash
+uv run python scripts/extract_xbrl.py gs://alchemy-stock-513407-raw/xbrl --out data/xbrl_extracted
+```
+
+| 保存先 | 中身 |
+|---|---|
+| `data/xbrl_extracted/docs.jsonl.gz` | 書類ごと (書類の種類・証券コード・決算期末・数字の数・読めなかった理由) |
+| `data/xbrl_extracted/facts.jsonl.gz` | 数字ごと (項目・期間・区分・期間の始めと終わり・値・単位) |
+| `data/xbrl_extracted/texts.jsonl.gz` | 短い文や印ごと (予想の修正の有無など) |
+
 ## BigQuery に入れる
 
 手元の一覧を gzip した JSONL で `gs://alchemy-stock-513407-raw/lists/` に置き、BigQuery の `alchemy-stock-513407.disclosures` に読み込む。表は毎回まるごと作り直す。`gcloud auth application-default login` 済みであること。
