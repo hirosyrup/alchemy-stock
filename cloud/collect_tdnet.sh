@@ -2,8 +2,8 @@
 # =============================================================================
 # TDnet の開示一覧 (時刻つき、直近31日分しか残らない) を毎日 GCS に貯める Cloud Run ジョブを作り直す
 #
-# 毎日の起動は Cloud Scheduler (cloud/terraform の collect_tdnet_daily)。ジョブが先に要るので、
-# 初めての時はこれを動かしてから terraform apply する。
+# 毎日の起動は Cloud Scheduler (cloud/terraform の collect_tdnet_daily)。ジョブが使うサービスアカウントは
+# Terraform で作るので、初めての時は terraform apply を先にしてからこれを動かす。
 #
 #   ./cloud/collect_tdnet.sh
 # =============================================================================
