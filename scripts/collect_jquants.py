@@ -1,10 +1,12 @@
-"""J-Quants の一括ダウンロードで、全銘柄の日足 (bars) と銘柄の一覧 (master) を取る。
+"""J-Quants の一括ダウンロードで、全銘柄の日足 (bars)・銘柄の一覧 (master)・財務情報 (fins)・TOPIX の日足 (topix) を取る。
+
+財務情報は、決算短信と業績予想・配当予想の修正の数字 (会計基準をまたいで同じ項目名) と、開示の時刻。
 
 J-Quants 側のファイル (過去は月ごと、最近は日ごとの gzip の CSV) を、そのままの名前で data/jquants/ に置く。
 手元に同じ大きさのファイルがあれば飛ばすので、毎日動かせば増えた分・書き換わった分だけ取る。
 J-Quants 側の一覧から消えたファイル (月ごとのファイルに入った後の日ごとのファイルなど) は手元からも消す。
 
-    uv run python scripts/collect_jquants.py              # 両方
+    uv run python scripts/collect_jquants.py              # 全部
     uv run python scripts/collect_jquants.py bars         # 日足だけ
 """
 from __future__ import annotations
@@ -18,7 +20,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from alchemy_stock.http import Blocked, PoliteSession  # noqa: E402
 from alchemy_stock.jquants import bulk_list, bulk_url, load_api_key, make_session  # noqa: E402
 
-ENDPOINTS = {"bars": "/equities/bars/daily", "master": "/equities/master"}
+ENDPOINTS = {
+    "bars": "/equities/bars/daily",
+    "master": "/equities/master",
+    "fins": "/fins/summary",
+    "topix": "/indices/bars/daily/topix",
+}
 
 
 def sync(api: PoliteSession, download: PoliteSession, endpoint: str, out: Path) -> tuple[int, int]:
