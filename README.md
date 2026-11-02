@@ -57,6 +57,17 @@ uv run python scripts/screen_disclosures.py
 |---|---|
 | `data/screened/disclosures.jsonl` | 開示ごとの種類・落とした理由 (`dropped_by`、通過は空)・束ね先 (`event_id`)・決まりの版 |
 
+## 売買の量で絞り、PDF を全件取る
+
+ふるい分けを通った開示に、開示の日より前の20営業日の平均売買代金を付け、0.5億円以上のものだけを PDF を取る対象にする (`src/alchemy_stock/liquidity.py`)。PDF・XBRL は Cloud Run のジョブで GCS (`gs://alchemy-stock-513407-raw/pdf/`、`xbrl/`) に直接置く。1秒に1回、並列なし。
+
+```bash
+uv run python scripts/liquidity_table.py          # 基準ごとに何件残るかの表
+uv run python scripts/make_document_targets.py    # 対象の一覧 → data/targets/documents_v1.jsonl
+./cloud/fetch_documents.sh                        # 一覧を GCS に置き、イメージを作ってジョブを更新
+gcloud run jobs execute fetch-documents --project alchemy-stock-513407 --region us-central1
+```
+
 ## BigQuery に入れる
 
 手元の一覧を gzip した JSONL で `gs://alchemy-stock-513407-raw/lists/` に置き、BigQuery の `alchemy-stock-513407.disclosures` に読み込む。表は毎回まるごと作り直す。`gcloud auth application-default login` 済みであること。

@@ -36,6 +36,8 @@ resource "google_project_service" "apis" {
   for_each = toset([
     "storage.googleapis.com",
     "bigquery.googleapis.com",
+    "run.googleapis.com",
+    "artifactregistry.googleapis.com",
   ])
 
   project            = var.project_id
@@ -71,4 +73,47 @@ resource "google_bigquery_dataset" "disclosures" {
   description = "適時開示の一覧 (TDnet・東証上場会社情報サービス) と本文のテキスト"
 
   depends_on = [google_project_service.apis]
+}
+
+# =============================================================================
+# Cloud Run ジョブ - 開示の PDF・XBRL を取って GCS に置く
+# =============================================================================
+# ジョブ本体はイメージと対象の一覧を差し替えながら使うので、cloud/fetch_documents.sh (gcloud) で作る。
+# ここではイメージ置き場と、ジョブが使うサービスアカウント・権限だけを持つ。
+
+resource "google_artifact_registry_repository" "images" {
+  location      = var.region
+  repository_id = "alchemy-stock"
+  format        = "DOCKER"
+  description   = "alchemy-stock の Cloud Run 用イメージ"
+
+  cleanup_policies {
+    id     = "keep-recent"
+    action = "KEEP"
+    most_recent_versions {
+      keep_count = 5
+    }
+  }
+
+  cleanup_policies {
+    id     = "delete-old"
+    action = "DELETE"
+    condition {
+      older_than = "2592000s" # 30日
+    }
+  }
+
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_service_account" "document_fetcher" {
+  account_id   = "document-fetcher"
+  display_name = "開示の PDF・XBRL を取る Cloud Run ジョブ"
+}
+
+# 対象の一覧を読み、取ったものを置き、何があるかの一覧を取る
+resource "google_storage_bucket_iam_member" "document_fetcher_raw" {
+  bucket = google_storage_bucket.raw.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.document_fetcher.email}"
 }
