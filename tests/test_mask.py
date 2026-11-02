@@ -33,3 +33,7 @@ def test_mask_contacts_and_split_years():
 def test_drop_header_keeps_title():
     got = mask("各位\n会社名 当社 問合せ先 辻本 拓 (TEL 07 5-6 9 2-0)\n# 業績予想の修正に関するお知らせ\n本文", [], "99990")
     assert got.startswith("# 業績予想の修正に関するお知らせ") and "辻本" not in got
+
+
+def test_mask_year_after_list_number():
+    assert mask("# 2.2020 年8 月期 1.5 2.2019", [], "99990") == "# 2.X 年8 月期 1.5 2.2019"

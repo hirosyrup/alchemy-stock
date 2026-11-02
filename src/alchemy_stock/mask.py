@@ -17,6 +17,7 @@ TAGS = re.compile(r"</?(u|b|mark)>|<br\s*/?>", re.I)
 # 年は書き方の揺れ (数字の間の空白、表のマス目での分断) が多いので、強めに伏せる
 YEAR_PATTERNS = [
     (re.compile(r"(令和|平成|昭和)\s*(元|\d(\s*\d)?)?"), "X"),
+    (re.compile(r"(19|20)\d{2}(?=\s*年)"), "X"),  # 「2.2020 年」のように番号のすぐ後ろでも
     (re.compile(r"(?<![\d,.])(19|20)\d{2}(?![\d,.])"), "X"),
     (re.compile(r"(?<![\dA-Za-z])FY\s*X?\d{0,2}(?!\d)", re.I), "FYX"),
 ]
