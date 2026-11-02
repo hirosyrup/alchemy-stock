@@ -9,13 +9,14 @@ doc_id を含む JSONL を渡すと、その開示だけを取る。JSONL に pd
 
     uv run python scripts/fetch_documents.py data/prep/sample_v1.jsonl --xbrl
     python scripts/fetch_documents.py gs://alchemy-stock-513407-raw/targets/documents_v1.jsonl \
-        --dest gs://alchemy-stock-513407-raw --xbrl --interval 1     # Cloud Run (cloud/fetch_documents.sh)
+        --dest gs://alchemy-stock-513407-raw --xbrl --interval 1 --workers 3     # Cloud Run (cloud/fetch_documents.sh)
 """
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -81,45 +82,84 @@ def with_urls(targets: list[dict]) -> dict[str, dict]:
     return urls
 
 
+class Progress:
+    def __init__(self, total: int, every: int):
+        self.total, self.every = total, every
+        self.lock = threading.Lock()
+        self.done = self.missing = self.failed = self.bytes = self.files = 0
+
+    def add(self, size: int | None, failed: bool = False) -> None:
+        with self.lock:
+            self.files += 1
+            if failed:
+                self.failed += 1
+            elif size is None:
+                self.missing += 1
+            else:
+                self.done += 1
+                self.bytes += size
+            if self.files % self.every == 0:
+                print(f"  {self.files}/{self.total} ファイル ({self.bytes / 1e6:.1f}MB)", flush=True)
+
+
+def worker(jobs: list[tuple[str, str]], dest, interval: float, progress: Progress, stop: threading.Event) -> None:
+    """1本分。自分の分を1件ずつ、interval 秒以上あけて取る。どれかが拒否されたら (stop) すぐやめる。"""
+    session = PoliteSession(min_interval=interval)
+    for url, name in jobs:
+        if stop.is_set():
+            return
+        try:
+            res = session.get(url, allow_404=True)
+        except Blocked as e:
+            print(f"拒否されたので全部止めます: {e}", flush=True)
+            stop.set()
+            return
+        except Exception as e:  # やり直しても通らなかったもの。飛ばして、次に動かした時に取り直す
+            print(f"  取れなかった: {url} {e!r}", flush=True)
+            progress.add(None, failed=True)
+            continue
+        if res is None:
+            print(f"  見つからない: {url}", flush=True)
+            progress.add(None)
+            continue
+        dest.save(name, res.content)
+        progress.add(len(res.content))
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("targets", help="doc_id を含む JSONL (gs:// も可)")
     p.add_argument("--dest", default=str(DATA), help="保存先のフォルダか gs://バケット")
     p.add_argument("--xbrl", action="store_true", help="XBRL があれば一緒に取る")
-    p.add_argument("--interval", type=float, default=3.0)
+    p.add_argument("--interval", type=float, default=3.0, help="1本あたりの読み込みの間隔 (秒)")
+    p.add_argument("--workers", type=int, default=1, help="同時に取る本数。全体では1秒に workers / interval 回まで")
     p.add_argument("--progress-every", type=int, default=50)
     args = p.parse_args()
 
     targets = read_targets(args.targets)
     urls = with_urls(targets)
     dest = GcsDest(args.dest) if args.dest.startswith("gs://") else LocalDest(Path(args.dest))
-    print(f"対象 {len(targets)}件 (URL が分かったもの {len(urls)}件)", flush=True)
+    jobs = []
+    for doc_id, r in sorted(urls.items()):
+        jobs.append((r["pdf_url"], f"pdf/{r['date'][:4]}/{doc_id}.pdf"))
+        if args.xbrl and r.get("xbrl_url"):
+            jobs.append((r["xbrl_url"], f"xbrl/{r['date'][:4]}/{doc_id}{Path(r['xbrl_url']).suffix}"))
+    todo = [(url, name) for url, name in jobs if not dest.exists(name)]
+    print(f"対象 {len(targets)}件 (URL が分かったもの {len(urls)}件)、ファイル {len(jobs)}件のうち未取得 {len(todo)}件、{args.workers}本で取る", flush=True)
 
-    session = PoliteSession(min_interval=args.interval)
-    done = missing = 0
-    total_bytes = 0
-    try:
-        for i, (doc_id, r) in enumerate(sorted(urls.items()), 1):
-            jobs = [(r["pdf_url"], f"pdf/{r['date'][:4]}/{doc_id}.pdf")]
-            if args.xbrl and r.get("xbrl_url"):
-                jobs.append((r["xbrl_url"], f"xbrl/{r['date'][:4]}/{doc_id}{Path(r['xbrl_url']).suffix}"))
-            for url, name in jobs:
-                if dest.exists(name):
-                    continue
-                res = session.get(url, allow_404=True)
-                if res is None:
-                    missing += 1
-                    print(f"  見つからない: {url}", flush=True)
-                    continue
-                dest.save(name, res.content)
-                total_bytes += len(res.content)
-                done += 1
-            if i % args.progress_every == 0:
-                print(f"  {i}/{len(urls)} (読み込み {session.count} 回, {total_bytes / 1e6:.1f}MB)", flush=True)
-    except Blocked as e:
-        print(f"拒否されたので止めます: {e}", flush=True)
+    progress = Progress(len(todo), args.progress_every)
+    stop = threading.Event()
+    threads = [
+        threading.Thread(target=worker, args=(todo[i :: args.workers], dest, args.interval, progress, stop))
+        for i in range(args.workers)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    print(f"新しく保存 {progress.done}件 / 見つからない {progress.missing}件 / 取れなかった {progress.failed}件 / {progress.bytes / 1e6:.1f}MB")
+    if stop.is_set():
         sys.exit(2)
-    print(f"新しく保存 {done}件 / 見つからない {missing}件 / 読み込み {session.count} 回 / {total_bytes / 1e6:.1f}MB")
 
 
 if __name__ == "__main__":

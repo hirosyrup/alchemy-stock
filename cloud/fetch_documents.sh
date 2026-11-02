@@ -25,13 +25,13 @@ gcloud storage cp "data/${TARGETS}" "${BUCKET}/${TARGETS}" --project "${PROJECT}
 docker build --platform linux/amd64 -f cloud/fetcher/Dockerfile -t "${IMAGE}" .
 docker push "${IMAGE}"
 
-# 1つずつ順番に取る (並列なし)。読み込みの間隔は1秒以上 (PLAN.md §5 のお作法)
-# ほとんど待っているだけなので CPU は 0.5。約68時間で計算の費用は約¥350 (2026-11-02 見積もり)
+# 3本で取り、それぞれ1秒以上あける (全体で1秒に3回まで)。どれかが拒否されたら全部止まる (PLAN.md §5 のお作法)
+# Cloud Run のジョブは CPU 1 未満にできない。約21万ファイルが約20時間、計算の費用は約¥210 (2026-11-02 見積もり)
 gcloud run jobs deploy "${JOB}" --project "${PROJECT}" --region "${REGION}" \
   --image "${IMAGE}" \
   --service-account "document-fetcher@${PROJECT}.iam.gserviceaccount.com" \
   --tasks 1 --parallelism 1 --max-retries 0 --task-timeout 168h \
-  --cpu 0.5 --memory 512Mi \
-  --args="${BUCKET}/${TARGETS},--dest,${BUCKET},--xbrl,--interval,1,--progress-every,500"
+  --cpu 1 --memory 512Mi \
+  --args="${BUCKET}/${TARGETS},--dest,${BUCKET},--xbrl,--interval,1,--workers,3,--progress-every,1000"
 
 echo "動かす: gcloud run jobs execute ${JOB} --project ${PROJECT} --region ${REGION}"
