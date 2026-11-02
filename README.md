@@ -36,7 +36,7 @@ uv run python scripts/collect_jpx_listed.py disclosures    # 会社ごとの開�
 [J-Quants](https://jpx-jquants.com/) (JPX 公式) の一括ダウンロード (ライト以上) で、全銘柄 (上場廃止した銘柄も含む) の日足と、銘柄の一覧 (貸借の区分つき) を取る。J-Quants 側のファイル (過去は月ごと、最近は日ごとの gzip の CSV) をそのまま置く。毎日動かせば、増えた分・書き換わった分だけ取る。API キーはリポジトリ直下の `.env` に `JQUANTS_API_KEY=...` で入れる。規約上、取ったデータは自分だけで使い、解約したら消す。
 
 ```bash
-uv run python scripts/collect_jquants.py           # 両方
+uv run python scripts/collect_jquants.py           # 全部 (日足・銘柄の一覧・財務情報・TOPIX)
 uv run python scripts/collect_jquants.py bars      # 日足だけ
 ```
 
@@ -44,6 +44,8 @@ uv run python scripts/collect_jquants.py bars      # 日足だけ
 |---|---|
 | `data/jquants/equities/bars/daily/historical/YYYY/*_YYYYMM.csv.gz`、`.../live/*_YYYYMMDD.csv.gz` | 全銘柄の日足 (補正前・補正後の値段、売買代金、時価総額、値幅制限) |
 | `data/jquants/equities/master/historical/YYYY/*_YYYYMM.csv.gz`、`.../live/*_YYYYMMDD.csv.gz` | 日ごとの全銘柄の一覧 (市場・業種・規模・貸借の区分) |
+| `data/jquants/fins/summary/...` | 財務情報: 決算短信・業績予想の修正・配当予想の修正の数字と開示の時刻 (会計基準をまたいで同じ項目名) |
+| `data/jquants/indices/bars/daily/topix/...` | TOPIX の日足 |
 
 ## ふるい分け
 
