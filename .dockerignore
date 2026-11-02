@@ -1,0 +1,11 @@
+# 認証情報と取ったデータはイメージに入れない
+.env
+data/
+.venv/
+.git/
+.claude/
+**/__pycache__/
+.pytest_cache/
+cloud/terraform/
+research/
+tests/
