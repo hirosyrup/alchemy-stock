@@ -29,7 +29,7 @@ ENDPOINTS = {
     "fins": "/fins/summary",
     "topix": "/indices/bars/daily/topix",
 }
-ADDONS = {"minute": "/equities/bars/minute"}  # 分足・ティック アドオン。省略したときは取らない
+ADDONS = {"minute": "/equities/bars/minute", "trades": "/equities/trades"}  # 分足・ティック アドオン (trades は約定1件ごと)。省略したときは取らない
 TD = "td"  # TDnet/適時開示情報 アドオン (/td/bulk は別の仕組み)
 
 
