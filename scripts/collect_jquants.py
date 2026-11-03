@@ -1,4 +1,6 @@
 """J-Quants の一括ダウンロードで、全銘柄の日足 (bars)・銘柄の一覧 (master)・財務情報 (fins)・TOPIX の日足 (topix) を取る。
+アドオンを契約しているときは、分足 (minute、量が多いので名前を指定したときだけ) と、
+時刻つきの適時開示の一覧 (td、過去5年分を1つの CSV で) も取れる。
 
 財務情報は、決算短信と業績予想・配当予想の修正の数字 (会計基準をまたいで同じ項目名) と、開示の時刻。
 
@@ -8,6 +10,7 @@ J-Quants 側の一覧から消えたファイル (月ごとのファイルに入
 
     uv run python scripts/collect_jquants.py              # 全部
     uv run python scripts/collect_jquants.py bars         # 日足だけ
+    uv run python scripts/collect_jquants.py minute td    # アドオンの分 (分足・適時開示の一覧)
 """
 from __future__ import annotations
 
@@ -18,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from alchemy_stock.http import Blocked, PoliteSession  # noqa: E402
-from alchemy_stock.jquants import bulk_list, bulk_url, load_api_key, make_session  # noqa: E402
+from alchemy_stock.jquants import BASE, bulk_list, bulk_url, load_api_key, make_session  # noqa: E402
 
 ENDPOINTS = {
     "bars": "/equities/bars/daily",
@@ -26,6 +29,8 @@ ENDPOINTS = {
     "fins": "/fins/summary",
     "topix": "/indices/bars/daily/topix",
 }
+ADDONS = {"minute": "/equities/bars/minute"}  # 分足・ティック アドオン。省略したときは取らない
+TD = "td"  # TDnet/適時開示情報 アドオン (/td/bulk は別の仕組み)
 
 
 def sync(api: PoliteSession, download: PoliteSession, endpoint: str, out: Path) -> tuple[int, int]:
@@ -49,20 +54,39 @@ def sync(api: PoliteSession, download: PoliteSession, endpoint: str, out: Path) 
     return got, len(stale)
 
 
+def sync_td(api: PoliteSession, download: PoliteSession, out: Path) -> int:
+    """適時開示の一覧 (過去5年分の1つの CSV)。J-Quants 側の更新日時が変わっていれば取り直す。"""
+    j = api.get(f"{BASE}/td/bulk").json()
+    path, stamp = out / "td" / "td_bulk.csv.gz", out / "td" / "last_updated.txt"
+    if path.exists() and stamp.exists() and stamp.read_text() == j["lastUpdated"]:
+        return 0
+    r = download.get(j["url"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(r.content)
+    os.replace(tmp, path)
+    stamp.write_text(j["lastUpdated"])
+    print(f"  td_bulk.csv.gz {len(r.content) / 1e6:.1f}MB (更新 {j['lastUpdated']})")
+    return 1
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("kinds", nargs="*", help=f"取るもの {list(ENDPOINTS)} (省略で全部)")
+    p.add_argument("kinds", nargs="*", help=f"取るもの {list(ENDPOINTS) + list(ADDONS) + [TD]} (省略で {list(ENDPOINTS)})")
     p.add_argument("--out", type=Path, default=Path("data/jquants"))
     p.add_argument("--interval", type=float, default=1.0)
     args = p.parse_args()
-    if unknown := set(args.kinds) - set(ENDPOINTS):
+    if unknown := set(args.kinds) - set(ENDPOINTS) - set(ADDONS) - {TD}:
         p.error(f"知らない種類: {sorted(unknown)}")
 
     api = make_session(load_api_key(), args.interval)
     download = PoliteSession(min_interval=args.interval)  # ダウンロード先は別のサーバー。API キーは送らない
     for kind in args.kinds or ENDPOINTS:
         try:
-            got, removed = sync(api, download, ENDPOINTS[kind], args.out)
+            if kind == TD:
+                print(f"{kind}: {sync_td(api, download, args.out)}ファイル取得")
+                continue
+            got, removed = sync(api, download, {**ENDPOINTS, **ADDONS}[kind], args.out)
         except Blocked as e:
             print(f"回数の上限か拒否なので止めます: {e}", file=sys.stderr)
             return 2
