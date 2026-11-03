@@ -4,8 +4,9 @@
 --set a は 2016-11 〜 2019 からランダムに 300件 (種 0、磨く場所)、--set b は 2020 〜 2021-10 から 500件 (種 0、1回だけ確かめる)。
 番号 (a001 / b001 ...) と書類の対応は data/stage2b/items_<set>.jsonl にだけ書く。
 --out の下に <番号>.md (数字の表 + 伏せたお知らせの文字) を置く。サブエージェントにはこのフォルダだけを渡す。
+--day1 を付けると、表に1日目の反応を載せる (1日目の引けの後に判断し、2日目の始値で入る形)。
 
-    uv run --group extract python scripts/stage2b_prepare.py --set a --out <フォルダ>
+    uv run --group extract python scripts/stage2b_prepare.py --set a [--day1] --out <フォルダ>
 """
 from __future__ import annotations
 
@@ -77,6 +78,30 @@ def prepare(con: duckdb.DuckDBPyConnection) -> None:
         from read_csv('{BARS}', union_by_name=true, all_varchar=true)
         where C::double > 0
     """)
+    con.sql(f"""
+        create table bo as
+        select Code code, Date::date date, O::double o, Va::double va
+        from read_csv('{BARS}', union_by_name=true, all_varchar=true)
+        where O::double > 0
+    """)
+
+
+def day1(con, code: str, entry: date, adv: float) -> dict | None:
+    """1日目 (開示の後の最初の取引日) の反応: 窓 (前日の終値 → 始値)、始値 → 終値、前日の終値 → 終値 (どれも TOPIX を引く)、
+    売買代金がふだんの何倍か。2日目の始値で入る形 (回 r2 から) で使う。"""
+    r = con.execute("""
+        select (b.o / p0.c) * exp(p0.s - p1.s) - e.o / t0.c, p1.c / b.o - e.c / e.o,
+               (p1.c / p0.c) * exp(p0.s - p1.s) - e.c / t0.c, b.va
+        from ci e join ci t0 on t0.i = e.i - 1
+        join bo b on b.code = ? and b.date = e.date
+        join px p1 on p1.code = ? and p1.date = e.date
+        asof join px p0 on p0.code = ? and t0.date >= p0.date
+        where e.date = ?
+    """, [code, code, code, entry]).fetchone()
+    if not r:
+        return None
+    gap, intra, react, va = r
+    return {"gap": gap, "intra": intra, "react": react, "volume": va / adv if adv else None}
 
 
 def universe(con, start: date, end: date) -> list[tuple]:
@@ -239,6 +264,10 @@ def render(f: dict, size: str) -> str:
     out.append(f"【今期の予想の変更】今回で {f['count']}回目 (決算発表の中での変更も数える。前回の向き: {prev})")
     out.append("【開示の前の値動き (TOPIX との差)】" + "  ".join(f"前{k}日 {pct(f['pre'][k])}" for k in PRE_DAYS))
     out.append(f"【会社の大きさ】ふだんの売買代金の帯: {size}")
+    if d1 := f.get("day1"):
+        vol = f"{d1['volume']:.1f}倍" if d1["volume"] is not None else "—"
+        out.append(f"【1日目の反応 (TOPIX との差)】前日の終値→始値 (窓) {pct(d1['gap'])}  始値→終値 {pct(d1['intra'])}  "
+                   f"前日の終値→終値 {pct(d1['react'])}  売買代金はふだんの {vol}")
     return "\n".join(out)
 
 
@@ -246,6 +275,7 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--set", choices=SETS, required=True)
     p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--day1", action="store_true", help="表に1日目の反応を載せる (2日目の始値で入る形、回 r2 から)")
     args = p.parse_args()
     start, end, count = SETS[args.set]
 
@@ -287,12 +317,15 @@ def main() -> int:
                 continue
             raw.write_text(clean("\n\n---\n\n".join(parts)))
         f = facts(con, code, entry, nos)
+        d1 = day1(con, code, entry, adv)
+        if args.day1:
+            f["day1"] = d1
         size = "大 (上位 1/3)" if adv >= cuts[1] else ("中" if adv >= cuts[0] else "小 (下位 1/3)")
         qid = f"{args.set}{len(items) + 1:03d}"
         text = mask(clean(raw.read_text()), name_variants(name, name_en), code)
         (args.out / f"{qid}.md").write_text(render(f, size) + "\n\n---\n\n## お知らせの本文\n\n" + text)
         items.append({"qid": qid, "code": code, "entry": str(entry), "doc_ids": doc_ids, "adv": adv,
-                      "size": size, "rate": rate(f), "name": name, "name_en": name_en})
+                      "size": size, "rate": rate(f), "react": d1["react"] if d1 else None, "name": name, "name_en": name_en})
     path = Path(f"data/stage2b/items_{args.set}.jsonl")
     path.write_text("".join(json.dumps(it, ensure_ascii=False) + "\n" for it in items))
     print(f"書いた {len(items)}件、PDF が無くて飛ばした {missing}件 → {path}")

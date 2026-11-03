@@ -1,10 +1,12 @@
 """段階2b (research/stage2b_revision/PREREG.md) の採点。1回読ませるごとに動かす。
 
-LLM の点数 (-2 〜 +2) と、始値から 1・5・20 営業日目の引けまでの値動き (TOPIX を引く) のそろい具合 (順位の相関) を出し、
-数字だけで並べた場合 (営業利益の修正率の順) と、点数をランダムに入れ替えた場合と比べる。
+LLM の点数 (-2 〜 +2) と、入った始値から 1・5・20 営業日目の引けまでの値動き (TOPIX を引く) のそろい具合 (順位の相関) を出し、
+数字だけで並べた場合と、点数をランダムに入れ替えた場合と比べる。
+--entry open1 は1日目 (開示の後の最初の取引日) の始値で入る形 (回 r1)。比べる相手は営業利益の修正率の順。
+--entry open2 は1日目の反応を見て2日目の始値で入る形 (回 r2 から)。比べる相手は1日目の反応 (前日の終値 → 終値) の順。
 結果は data/results/stage2b_<組>_<回>.md。
 
-    uv run python scripts/stage2b_aggregate.py --set a --round r1 --answers <答えのフォルダ>
+    uv run python scripts/stage2b_aggregate.py --set a --round r1 --entry open1 --answers <答えのフォルダ>
 """
 from __future__ import annotations
 
@@ -27,19 +29,20 @@ N_BOOT = 10_000
 SCORES = {-2, -1, 0, 1, 2}
 
 
-def moves(con, items: list[dict]) -> dict[str, dict[int, float]]:
-    """始値で入って k 営業日目の引けで手放したときの値動き − TOPIX。値段が付かなくなったら最後の値段で手放す。"""
+def moves(con, items: list[dict], offset: int = 0) -> dict[str, dict[int, float]]:
+    """1日目から offset 営業日後の始値で入って、そこから k 営業日目の引けで手放したときの値動き − TOPIX。
+    値段が付かなくなったら最後の値段で手放す。"""
     con.execute("create or replace temp table it (qid varchar, code varchar, entry date)")
     con.executemany("insert into it values (?, ?, ?)", [(i["qid"], i["code"], i["entry"]) for i in items])
     rows = con.execute(f"""
         with b as (
             select it.qid, it.code, k.k, e.o to_, x.date dx, x.c tx, bo.o, pe.s se
-            from it join ci e on e.date = it.entry
+            from it join ci e1 on e1.date = it.entry join ci e on e.i = e1.i + {offset}
             cross join (select unnest({list(HOLDS)}) k) k
             join ci x on x.i = e.i + k.k - 1
             join (select Code code, Date::date date, O::double o from read_csv('data/jquants/equities/bars/daily/**/*.csv.gz',
-                  union_by_name=true, all_varchar=true)) bo on bo.code = it.code and bo.date = it.entry
-            join px pe on pe.code = it.code and pe.date = it.entry
+                  union_by_name=true, all_varchar=true)) bo on bo.code = it.code and bo.date = e.date
+            join px pe on pe.code = it.code and pe.date = e.date
             where x.date <= date '{LAST_DAY}'
         )
         select qid, k, (p.c / o) * exp(se - p.s) - (tx / to_) from b
@@ -59,8 +62,10 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--set", required=True)
     p.add_argument("--round", required=True)
+    p.add_argument("--entry", choices=("open1", "open2"), required=True)
     p.add_argument("--answers", type=Path, required=True)
     args = p.parse_args()
+    base_key, base_name = {"open1": ("rate", "修正率"), "open2": ("react", "1日目の反応")}[args.entry]
 
     items = [json.loads(line) for line in Path(f"data/stage2b/items_{args.set}.jsonl").read_text().splitlines()]
     answers = {}
@@ -78,13 +83,13 @@ def main() -> int:
     con = duckdb.connect()
     build(con)
     prepare(con)
-    mv = moves(con, items)
+    mv = moves(con, items, 1 if args.entry == "open2" else 0)
     rng = np.random.default_rng(0)
     rows = [{**it, "score": answers[it["qid"]]["score"], "conf": answers[it["qid"]].get("conf"), "mv": mv[it["qid"]]}
             for it in items if it["qid"] in mv]
 
     lines = [f"# 段階2b 組 {args.set} 回 {args.round} (宣言: research/stage2b_revision/PREREG.md)", "",
-             f"{len(rows)}件。値動きは始値 → k 営業日目の引け、TOPIX を引く、コスト前。主に見るのは {MAIN}日。"
+             f"{len(rows)}件。値動きは{'2日目' if args.entry == 'open2' else '1日目'}の始値 → k 営業日目の引け、TOPIX を引く、コスト前。主に見るのは {MAIN}日。"
              f"範囲は件を選び直すブートストラップ ({N_BOOT}回) の 95%。", "",
              "## 点数の分布", "", "| 点数 | 件数 | " + " | ".join(f"{k}日の平均" for k in HOLDS) + " |",
              "|---|---|" + "---|" * len(HOLDS)]
@@ -94,13 +99,13 @@ def main() -> int:
         lines.append(f"| {s:+d} | {len(g)} | " + " | ".join(cells) + " |")
 
     lines += ["", "## そろい具合 (順位の相関) と、買い − 売り の差", "",
-              "| 持つ日数 | LLM の相関 (範囲) | ランダムに入れ替えて LLM 以上になる割合 | 数字だけ (修正率) の相関 (範囲) | "
+              f"| 持つ日数 | LLM の相関 (範囲) | ランダムに入れ替えて LLM 以上になる割合 | 数字だけ ({base_name}) の相関 (範囲) | "
               "LLM の 買い(+1,+2) − 売り(−1,−2) |", "|---|---|---|---|---|"]
     for k in HOLDS:
         r = [x for x in rows if k in x["mv"]]
         s, y = np.array([x["score"] for x in r]), np.array([x["mv"][k] for x in r])
-        base = [x for x in r if x["rate"] is not None]
-        bs, by = np.array([x["rate"] for x in base]), np.array([x["mv"][k] for x in base])
+        base = [x for x in r if x[base_key] is not None]
+        bs, by = np.array([x[base_key] for x in base]), np.array([x["mv"][k] for x in base])
         idx = [rng.integers(0, len(r), len(r)) for _ in range(N_BOOT)]
         boot = [rho(s[i], y[i]) for i in idx]
         bidx = [rng.integers(0, len(base), len(base)) for _ in range(N_BOOT)]
@@ -113,15 +118,15 @@ def main() -> int:
                      f"{np.quantile(bboot, 0.975):+.3f}) | {diff} |")
 
     def split(title, keep_fns):
-        out = ["", f"## {title} ({MAIN}日の相関、報告だけ)", "", "| 分け方 | 件数 | LLM | 数字だけ |", "|---|---|---|---|"]
+        out = ["", f"## {title} ({MAIN}日の相関、報告だけ)", "", f"| 分け方 | 件数 | LLM | 数字だけ ({base_name}) |", "|---|---|---|---|"]
         for label, keep in keep_fns:
             r = [x for x in rows if keep(x) and MAIN in x["mv"]]
-            b = [x for x in r if x["rate"] is not None]
+            b = [x for x in r if x[base_key] is not None]
             if len(r) < 10:
                 out.append(f"| {label} | {len(r)} | — | — |")
                 continue
             lr = rho([x["score"] for x in r], [x["mv"][MAIN] for x in r])
-            br = rho([x["rate"] for x in b], [x["mv"][MAIN] for x in b]) if len(b) >= 10 else float("nan")
+            br = rho([x[base_key] for x in b], [x["mv"][MAIN] for x in b]) if len(b) >= 10 else float("nan")
             out.append(f"| {label} | {len(r)} | {lr:+.3f} | {br:+.3f} |")
         return out
 
