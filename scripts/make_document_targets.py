@@ -23,11 +23,15 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--min-adv", type=float, default=MIN_ADV)
     p.add_argument("--out", type=Path, default=Path("data/targets/documents_v1.jsonl"))
+    p.add_argument("--kinds", nargs="+", help="候補以外の種類を後から足すとき、その種類だけを対象にする (例: 事業の知らせ 資産の売り買い)")
+    p.add_argument("--skip", type=Path, help="すでに取った対象の一覧。ここにある書類は外す")
     args = p.parse_args()
 
     con = duckdb.connect()
     create_adv(con)
-    create_passed_docs(con)
+    create_passed_docs(con, kinds=args.kinds)
+    if args.skip:
+        con.sql(f"delete from passed where doc_id in (select doc_id from read_json('{args.skip}'))")
     # 同じ開示が2つの区分に載ると2行あるので、doc_id ごとに1つにする
     con.sql(f"""
         create table urls as

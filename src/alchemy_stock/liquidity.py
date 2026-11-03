@@ -23,14 +23,17 @@ def create_adv(con: duckdb.DuckDBPyConnection, bars: str = BARS) -> None:
     """)
 
 
-def create_passed_docs(con: duckdb.DuckDBPyConnection, screened: str = SCREENED) -> None:
+def create_passed_docs(con: duckdb.DuckDBPyConnection, screened: str = SCREENED, kinds: list[str] | None = None) -> None:
     """passed(doc_id, code, date, kinds, adv): ふるい分け a〜c を通った開示に、開示の日より前の平均売買代金を付ける。
 
+    kinds を渡すと、b (種類) で落としたものも含めて、その種類が付いた開示だけにする (候補以外の種類を後から足すとき)。
     上場した日より前の開示など、前の日の株価が無いものは adv が NULL になる。
     """
+    where = "dropped_by is null" if kinds is None else (
+        f"(dropped_by is null or dropped_by = 'b.種類') and len(list_intersect(kinds, {list(kinds)})) > 0")
     con.sql(f"""
         create table passed as
         select d.doc_id, d.code, d.date, d.kinds, a.adv
-        from (select doc_id, code, date::date as date, kinds from read_json('{screened}') where dropped_by is null) d
+        from (select doc_id, code, date::date as date, kinds from read_json('{screened}') where {where}) d
         asof left join adv a on d.code = a.code and d.date > a.date
     """)
