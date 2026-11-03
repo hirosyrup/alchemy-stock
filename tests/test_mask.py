@@ -35,5 +35,11 @@ def test_drop_header_keeps_title():
     assert got.startswith("# 業績予想の修正に関するお知らせ") and "辻本" not in got
 
 
+def test_mask_spaced_years():
+    got = mask("平 成30 年 令 和 元年 2 018 年3月期 2 0 19/3 売上 2 0 1,234", [], "99990")
+    assert "成" not in got and "和" not in got and "018" not in got and "0 19" not in got
+    assert "2 0 1,234" in got
+
+
 def test_mask_year_after_list_number():
     assert mask("# 2.2020 年8 月期 1.5 2.2019", [], "99990") == "# 2.X 年8 月期 1.5 2.2019"
