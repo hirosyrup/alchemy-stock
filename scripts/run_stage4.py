@@ -7,14 +7,18 @@ data/explore/stage3.duckdb (2024-10-31 まで) だけを使う。出る日が 20
 from __future__ import annotations
 
 import json
+import os
 import re
 
 import duckdb
 import numpy as np
 import pandas as pd
 
-DB = "data/explore/stage3.duckdb"
-PERIODS = {"学習": ("2016-11-01", "2021-10-31"), "検証": ("2021-11-01", "2024-10-31")}
+VAULT = os.environ.get("STAGE4_VAULT") == "1"  # 金庫 (scripts/run_stage4_vault.py から使う)
+DB = "data/explore/stage4_vault.duckdb" if VAULT else "data/explore/stage3.duckdb"
+END = "2026-10-30" if VAULT else "2024-10-31"
+FINS = "data/jquants/fins/summary/**/*.csv.gz" if VAULT else "data/jquants/fins/summary/historical/*/*.csv.gz"
+PERIODS = {"金庫": ("2024-11-01", "2026-10-30")} if VAULT else {"学習": ("2016-11-01", "2021-10-31"), "検証": ("2021-11-01", "2024-10-31")}
 NCAND = 8
 ALPHA = 0.05 / NCAND / 2  # 99.375% 範囲
 COST = 0.002
@@ -42,9 +46,9 @@ mm = mm.sort_values("d").groupby("code").last()
 common = set(mm[(mm.S33Nm.notna()) & (mm.S33Nm != "その他") & (mm.MktNm != "TOKYO PRO MARKET")].index)
 
 # 時価総額 = 調整前の終値 × (発行済み − 自己株)、株式数はその日より前の最新の決算短信。前の取引日の順位
-sh = duckdb.sql("""select Code code, DiscDate::date dd, try_cast(ShOutFY as double) - coalesce(try_cast(TrShFY as double), 0) sh
-  from read_csv('data/jquants/fins/summary/historical/*/*.csv.gz', union_by_name=true, all_varchar=true)
-  where DiscDate between '2014-01-01' and '2024-10-31' and ShOutFY is not null""").df()
+sh = duckdb.sql(f"""select Code code, DiscDate::date dd, try_cast(ShOutFY as double) - coalesce(try_cast(TrShFY as double), 0) sh
+  from read_csv('{FINS}', union_by_name=true, all_varchar=true)
+  where DiscDate between '2014-01-01' and '{END}' and ShOutFY is not null""").df()
 sh["dd"] = pd.to_datetime(sh.dd)
 sh = sh.dropna().sort_values("dd")
 shp = sh.groupby(["dd", "code"]).sh.last().unstack()
@@ -77,12 +81,19 @@ def has_disc(code, i):
 
 # ---------- 出来事 → 取引 (code, side, ie, te, ix, tx)  te/tx は "o" (始値) か "c" (終値) ----------
 def fins_df():
-    f = duckdb.sql("""select Code code, DiscDate::date dd, CurPerType per, CurFYEn::date fye,
+    def q(glob):
+        f = duckdb.sql(f"""select Code code, DiscDate::date dd, CurPerType per, CurFYEn::date fye,
        coalesce(try_cast(OP as double), try_cast(OdP as double)) op, coalesce(try_cast(FOP as double), try_cast(FOdP as double)) fop
-      from read_csv('data/jquants/fins/summary/historical/*/*.csv.gz', union_by_name=true, all_varchar=true)
-      where DocType like '%FinancialStatements%' and DiscDate between '2014-01-01' and '2024-10-31'""").df()
-    f["dd"] = pd.to_datetime(f.dd)
-    f["fye"] = pd.to_datetime(f.fye)
+      from read_csv('{glob}', union_by_name=true, all_varchar=true)
+      where DocType like '%FinancialStatements%' and DiscDate between '2014-01-01' and '{END}'""").df()
+        f["dd"] = pd.to_datetime(f.dd)
+        f["fye"] = pd.to_datetime(f.fye)
+        return f
+    f = q("data/jquants/fins/summary/historical/*/*.csv.gz")
+    if VAULT:  # live の分は、historical にまったく同じ行があるものを除いて足す (historical の中の重なりは検証と同じく残す)
+        lv = q("data/jquants/fins/summary/live/*.csv.gz").drop_duplicates()
+        lv = lv.merge(f.drop_duplicates(), how="left", indicator=True)
+        f = pd.concat([f, lv[lv._merge == "left_only"].drop(columns="_merge")], ignore_index=True)
     return f
 
 
