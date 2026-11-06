@@ -12,6 +12,7 @@ dependencies = [
     "google-cloud-storage>=3.17.1",
     "lxml>=5.0",
     "numpy>=2.4.6",
+    "pandas>=2.2",
     "requests>=2.31",
 ]
 
