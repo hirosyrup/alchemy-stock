@@ -18,7 +18,9 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-N_TOP = 1344          # 時価総額の上位 (前の取引日の時点)
+from .prepare import cap_ranks
+
+N_TOP = 1344         # 時価総額の上位 (前の取引日の時点)
 GAP_54 = -0.10        # 寄りの下げ
 MIN_CLOSE_54 = 200.0  # 前の取引日の終値
 HOLD_54 = 5           # 入った日を1日目として、5日目の引けで買い戻す
@@ -61,8 +63,7 @@ def universe_54(prev: pd.DataFrame, n_top: int = N_TOP, close_col: str = "close_
     common (普通株か)。時価総額 = close_raw × shares の順位が上位 n_top で、close_col の終値が 200円以上の会社を返す。
     close_col は本番では close_raw。検証と同じかを確かめるときだけ、後の分割で調整した終値の列を渡す。
     """
-    p = prev[prev.common & prev.close_raw.notna() & prev.shares.notna()].copy()
-    p["cap_rank"] = (p.close_raw * p.shares).rank(ascending=False)
+    p = cap_ranks(prev)
     return p[(p.cap_rank <= n_top) & (p[close_col] >= MIN_CLOSE_54)][["code", "close_raw", "cap_rank"]].reset_index(drop=True)
 
 
@@ -85,6 +86,29 @@ def gap_54(open_raw: float, prev_close_raw: float, adj_factor: float = 1.0) -> f
 
 def is_signal_54(gap: float) -> bool:
     return gap <= GAP_54
+
+
+# ---------- 49: 取引時間中の業績予想の変更に数秒で入り、次の取引日の終値で手放す ----------
+SESSIONS_49 = (("09:00", "11:30"), ("12:30", "15:25"))  # 開示の時刻 (分まで) がこの間 (終わりは含まない)
+ENTRY_DELAY_49 = 5  # 開示の時刻 (HH:MM:00) の 5秒後以降の最初の約定で入る
+
+
+def in_session_49(hhmm: str) -> bool:
+    return any(a <= hhmm < b for a, b in SESSIONS_49)
+
+
+def forecast_change(new: dict, prev: dict) -> tuple[str, float] | None:
+    """今期の予想の変化 (検証の stage1_numbers.py の fc と stage4_vault49_events.py の rate と同じ)。
+
+    営業利益 → 経常利益 → 純利益の順に、新しい予想と前の予想が両方あり、前が 0 でなく、値が変わった最初の項目で
+    (前との差) ÷ |前| を返す。どれも当たらなければ None。上がれば買い、下がれば売り。
+    new は {op, odp, np}、prev は {op, odp, np} (前の晩までの J-Quants の予想の流れの最後の値)。
+    """
+    for k in ("op", "odp", "np"):
+        v, p = new.get(k), prev.get(k)
+        if v is not None and p is not None and p != 0 and v != p:
+            return k, (v - p) / abs(p)
+    return None
 
 
 # ---------- S16: 立会外分売の発表の次の始値で売り、分売の日の始値で買い戻す ----------

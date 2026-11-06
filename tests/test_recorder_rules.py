@@ -61,6 +61,20 @@ def test_s16_end_prefers_execution_within_window():
     assert rules.s16_end(d, [(date(2026, 12, 20), "実施")]) is None
 
 
+def test_forecast_change_order_and_skip():
+    # 営業利益が変わっていなければ経常利益で見る
+    assert rules.forecast_change({"op": 100, "odp": 120, "np": 80}, {"op": 100, "odp": 100, "np": 80}) == ("odp", 0.2)
+    # 前の予想が 0 や空の項目は飛ばす
+    assert rules.forecast_change({"op": 50, "odp": 90}, {"op": 0, "odp": 100}) == ("odp", -0.1)
+    assert rules.forecast_change({"op": None, "np": 30}, {"op": 10, "np": -60}) == ("np", 1.5)
+    assert rules.forecast_change({"op": 100}, {"op": 100}) is None
+
+
+def test_in_session_49():
+    assert rules.in_session_49("09:00") and rules.in_session_49("15:20")
+    assert not rules.in_session_49("11:30") and not rules.in_session_49("15:25") and not rules.in_session_49("08:59")
+
+
 def test_trading_days():
     cal = [date(2026, 11, d) for d in (2, 4, 5, 6, 9, 10)]
     assert rules.nth_trading_day(cal, date(2026, 11, 4), 5) == date(2026, 11, 10)
