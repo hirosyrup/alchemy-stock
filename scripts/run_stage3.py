@@ -4,11 +4,13 @@
 """
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pandas as pd
 import duckdb
 
-DB = "data/explore/stage3.duckdb"
+DB = "data/explore/stage4_vault.duckdb" if os.environ.get("STAGE3_VAULT") == "1" else "data/explore/stage3.duckdb"  # 金庫は scripts/run_stage3_vault.py から
 PERIODS = {"学習": ("2016-11-01", "2021-10-31"), "検証": ("2021-11-01", "2024-10-31")}
 COST, BORROW = 0.002, 0.039
 ALPHA = 0.0125 / 2  # 4候補の補正 → 98.75% 範囲
