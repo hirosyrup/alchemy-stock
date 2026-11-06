@@ -3,10 +3,13 @@
 作成: 2026-10-31 (alchemy-fx のセッションから移行)
 目的: 別の Claude Code セッションが、ここまでの議論の続きから作業を始められるようにする。
 
-> **2026-11-06 追記 (夕方): 記録だけの仕組み (前向きの記録) を作った。** 設計と部品は [docs/RECORDER_DESIGN.md](docs/RECORDER_DESIGN.md)。
-> 注文は出さず、54・49・S16 を「その時点で分かることだけ」で判定し、Saxo の値段と秒数を記録する。手元で `SAXO_GCLOUD_ACCOUNT=<個人のアカウント> ./scripts/recorder_day.sh` を取引日の朝に起動する。
-> Saxo のトークンは alchemy-fx の Secret Manager から読むだけ (更新しない)。**東証の Level1 は申し込んだが、2026-11-06 の時点で API の日本株の値段は NoAccess** (画面のウォッチリストには出る)。
-> 週明けに API で取れるか確かめ、だめなら Saxo に問い合わせる。値段が無くても、判定・秒数・見逃しは記録できる。GCP (Cloud Run の job) に移すのは、手元で数日動かしてから、ユーザーの OK を取って。
+> **2026-11-06 追記 (夕方): 記録だけの仕組み (前向きの記録) を作り、GCP で動かし始めた。** 設計と部品は [docs/RECORDER_DESIGN.md](docs/RECORDER_DESIGN.md)。
+> 注文は出さず、54・49・S16 を「その時点で分かることだけ」で判定し、Saxo の値段と秒数を Firestore に記録する。
+> 東京 (asia-northeast1) の Cloud Run の job 5つを Cloud Scheduler が平日に起動する (準備 7:30・朝 8:56・49 の窓 5分ごと・引け前 15:23・答え合わせ 20:00)。
+> 作り直しは `./cloud/recorder.sh` (gcloud の個人のアカウントで)。設定は `cloud/terraform/recorder.tf`。
+> Saxo のトークンは alchemy-fx の Secret Manager の saxo-access-token を読むだけ (更新しない、リフレッシュトークンには権限なし)。J-Quants の鍵は株の側の Secret Manager。
+> **東証の Level1 は申し込んだが、2026-11-06 の時点で API の日本株の値段は NoAccess** (画面のウォッチリストには出る)。週明けに確かめ、だめなら Saxo に問い合わせる。
+> 値段が無くても、判定・秒数・見逃しは記録できる。J-Quants (月¥1,650) を外せるかは 2027-02 ごろに見直す。
 
 > **2026-10-31 追記: 計画の最新は [docs/PLAN.md](docs/PLAN.md)。** この文書と食い違うところ (J-Quants の契約、コストの見方など) は PLAN.md を優先する。
 
