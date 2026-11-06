@@ -78,19 +78,20 @@ alchemy-fx (固定 IP)                            alchemy-stock
 | 15:20〜15:24 | 手放す日の銘柄 (54 は5日目、49 は次の日、S16 は分売の日の朝) の値段を記録 | Saxo |
 | 夜 (18:00) | J-Quants の始値・終値が出たら、同じ取引をシミュレーションの方法で計算し、記録した値段と並べる | J-Quants |
 
-部品は次のとおり。
+部品は次のとおり (2026-11-06 に作った。`src/alchemy_stock/recorder/` と `scripts/recorder_*`)。
 
-- `stock_recorder/saxo_read.py` — Saxo の窓口
-  - GET だけを通す
-  - トークンは Secret Manager から読む。手元で動かすときは gcloud の自分の権限で読む
-  - 回数の上限を守る
-- `stock_recorder/tdnet.py` — TDnet の一覧と XBRL を読む
-  - 今日まで手元で試していたもの (scratchpad の `tdnet_xbrl_watch.py`・`xbrl_parse.py`) をリポジトリに移す
-- `stock_recorder/rules.py` — 54・49・S16 の判定
-  - 検証で使った `run_stage4.py`・`stage4_vault49_events.py` と同じ条件を、その場で手に入る情報だけで書き直す
-  - 書き直した部分は過去のデータで突き合わせて、同じ結果になることを確かめる
-- `stock_recorder/day.py` — 1日の流れを回す
-- `stock_recorder/reconcile.py` — 夜の答え合わせ
+| ファイル | 中身 |
+|---|---|
+| `rules.py` | 54・49・S16 の判定。検証のコードと過去の日付で突き合わせ済み (54 は 418件、S16 は 113件、49 は 462件が一致。`scripts/check_recorder_rules.py`・`check_recorder_49.py`) |
+| `forecast.py` | TDnet の XBRL から今期の予想を読む。J-Quants の数字と 200件で突き合わせ済み (`scripts/check_recorder_forecast.py`) |
+| `prepare.py` / `scripts/recorder_prepare.py` | 前の晩 (か朝) に、時価総額の上位 1,344・予想の帳簿・Saxo の Uic を `data/recorder/prep/<日付>.json` に作る |
+| `saxo_read.py` | Saxo の窓口。GET だけ、トークンは Secret Manager から読むだけ、1分に 20回まで |
+| `tdnet_live.py` / `window49.py` | 5分刻みの窓で TDnet を見張り、49 の判定・秒数・値段を記録する |
+| `morning.py` | 朝の 54・S16 の候補と寄った直後の値段、15:24 の引け前の値段 |
+| `positions.py` / `store.py` | 記録上の建玉 (`data/recorder/positions.json`) と、日ごとの記録 (`data/recorder/<日付>/*.jsonl`) |
+| `scripts/recorder_run.py` | 手元で1日を回す (朝 → 49 の窓 65回 → 15:24) |
+| `scripts/recorder_reconcile.py` | 夜の答え合わせ (54 は検証と同じ条件との違い、49 は見逃しと翌日の判定の突き合わせ、手放した建玉の終値) |
+| `scripts/recorder_day.sh` | 準備 → 記録 → 答え合わせを、Mac がスリープしないようにして続けて回す |
 
 ### 開示の時刻の偏り (49 を見張る時間を絞れる理由)
 
