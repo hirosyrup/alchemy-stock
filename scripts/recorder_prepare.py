@@ -29,9 +29,10 @@ from alchemy_stock.jquants import get_all, load_api_key, make_session  # noqa: E
 from alchemy_stock.recorder import rules  # noqa: E402
 from alchemy_stock.recorder.prepare import ForecastBook, cap_ranks, fins_rows  # noqa: E402
 from alchemy_stock.recorder.saxo_read import SaxoReader, code_of  # noqa: E402
+from alchemy_stock.recorder import store  # noqa: E402
 from alchemy_stock.recorder.store import now_jst  # noqa: E402
 
-OUT = ROOT / "data/recorder"
+FINS_BASE = "fins_base.csv.gz"  # GCP では、手元の一括ダウンロードの必要な列だけを GCS に置いたもの (scripts/recorder_job.py upload-fins)
 FINS_COLS = ["Code", "DiscDate", "DiscTime", "DiscNo", "DocType", "CurFYEn", "NxtFYEn", "FOP", "FOdP", "FNP",
              "NxFOP", "NxFOdP", "NxFNp", "ShOutFY", "TrShFY"]
 
@@ -41,21 +42,26 @@ def calendar(jq, a: date, b: date) -> list[date]:
     return [date.fromisoformat(r["Date"]) for r in rows if r["HolDiv"] == "1"]
 
 
-def load_fins(jq, until: date) -> pd.DataFrame:
-    local = duckdb.sql(f"""select {', '.join(FINS_COLS)} from read_csv('{ROOT}/data/jquants/fins/summary/**/*.csv.gz',
+def fins_base() -> pd.DataFrame:
+    if store.on_gcp():
+        import io
+
+        return pd.read_csv(io.BytesIO(store.read_bytes(FINS_BASE)), dtype=str, compression="gzip")
+    return duckdb.sql(f"""select {', '.join(FINS_COLS)} from read_csv('{ROOT}/data/jquants/fins/summary/**/*.csv.gz',
         union_by_name=true, all_varchar=true)""").df()
+
+
+def load_fins(jq, until: date) -> pd.DataFrame:
+    local = fins_base()
     last = pd.to_datetime(local.DiscDate).max().date()
-    cache = OUT / "fins_api"
-    cache.mkdir(parents=True, exist_ok=True)
     extra, d = [], last + timedelta(days=1)
     while d <= until:
-        p = cache / f"{d.isoformat()}.json"
-        if p.exists():
-            rows = json.loads(p.read_text())
-        else:
+        name = f"fins_api/{d.isoformat()}.json"
+        rows = store.read_json(name)
+        if rows is None:
             rows = get_all(jq, "/fins/summary", date=d.isoformat())
             if d < until or rows:  # 前の取引日の分は、出るまで置かない
-                p.write_text(json.dumps(rows, ensure_ascii=False))
+                store.write_json(name, rows)
         extra += rows
         d += timedelta(days=1)
     f = pd.concat([local, pd.DataFrame(extra, columns=FINS_COLS).astype(str).replace({"": None, "None": None, "nan": None})], ignore_index=True)
@@ -72,10 +78,10 @@ def shares(fins: pd.DataFrame, until: date) -> pd.Series:
     return f.dropna(subset=["sh"]).sort_values("dd", kind="stable").groupby("Code").sh.last()
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--day", type=date.fromisoformat)
-    a = p.parse_args()
+    a = p.parse_args(argv)
     jq = make_session(load_api_key(ROOT / ".env"), min_interval=1.0)
     now = now_jst()
     cal = calendar(jq, now.date() - timedelta(days=20), now.date() + timedelta(days=70))
@@ -89,7 +95,7 @@ def main() -> int:
     bars = pd.DataFrame(get_all(jq, "/equities/bars/daily", date=prev_day.isoformat()))
     if bars.empty:
         print(f"{prev_day} の日足がまだ J-Quants に出ていない。後でもう一度動かす")
-        return 1
+        return 2
     master = pd.DataFrame(get_all(jq, "/equities/master", date=prev_day.isoformat()))
     common = set(master[master.S33Nm.notna() & (master.S33Nm != "その他") & (master.MktNm != "TOKYO PRO MARKET")].Code)
     fins = load_fins(jq, prev_day)
@@ -102,13 +108,12 @@ def main() -> int:
 
     try:
         lst = SaxoReader().cfd_list()
-        (ROOT / "data/saxo_list").mkdir(parents=True, exist_ok=True)
-        (ROOT / f"data/saxo_list/cfd_tyo_{now:%Y%m%d}.json").write_text(json.dumps(lst, ensure_ascii=False))
-        saxo = {code_of(x["symbol"]): x["uic"] for x in lst}
+        store.write_json(f"saxo_list/cfd_tyo_{now:%Y%m%d}.json", lst)
     except Exception as e:  # noqa: BLE001
-        path = sorted((ROOT / "data/saxo_list").glob("cfd_tyo_*.json"))[-1]
-        print(f"Saxo の一覧を取れない ({type(e).__name__})。手元の {path.name} を使う")
-        saxo = {code_of(x.get("symbol") or x["Symbol"]): x.get("uic") or x["Identifier"] for x in json.loads(path.read_text())}
+        name = store.list_names("saxo_list/cfd_tyo_")[-1]
+        print(f"Saxo の一覧を取れない ({type(e).__name__})。{name} を使う")
+        lst = store.read_json(name)
+    saxo = {code_of(x["symbol"]): x["uic"] for x in lst}
 
     rows = fins_rows(fins)
     rows = rows[rows.d <= pd.Timestamp(prev_day)]
@@ -126,9 +131,8 @@ def main() -> int:
         "saxo": saxo,
         "book": book_out,
     }
-    (OUT / "prep").mkdir(parents=True, exist_ok=True)
-    path = OUT / "prep" / f"{day.isoformat()}.json"
-    path.write_text(json.dumps(out, ensure_ascii=False))
+    path = f"prep/{day.isoformat()}.json"
+    store.write_json(path, out)
     n_saxo = sum(v["uic"] is not None for v in out["universe"].values())
     print(f"上位 {len(top)}社 (うち Saxo にある {n_saxo}社)、予想の帳簿 {len(book_out)}社、Saxo の CFD {len(saxo)}銘柄 → {path}")
     return 0

@@ -26,13 +26,11 @@ def read_token() -> str:
 
     手元の gcloud の既定のアカウントが別のときは、環境変数 SAXO_GCLOUD_ACCOUNT で読むアカウントを指定する。
     """
-    try:
-        from google.cloud import secretmanager  # type: ignore
+    if os.environ.get("CLOUD_RUN_JOB"):
+        from google.cloud import secretmanager
 
         c = secretmanager.SecretManagerServiceClient()
         return c.access_secret_version(name=f"projects/{PROJECT}/secrets/{SECRET}/versions/latest").payload.data.decode()
-    except ImportError:
-        pass
     env = dict(os.environ)
     if os.environ.get("SAXO_GCLOUD_ACCOUNT"):
         env["CLOUDSDK_CORE_ACCOUNT"] = os.environ["SAXO_GCLOUD_ACCOUNT"]

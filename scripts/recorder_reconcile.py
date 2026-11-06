@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from datetime import date
 from pathlib import Path
@@ -27,6 +26,7 @@ from alchemy_stock.jquants import get_all, load_api_key, make_session  # noqa: E
 from alchemy_stock.recorder import morning, rules  # noqa: E402
 from alchemy_stock.recorder.positions import Positions  # noqa: E402
 from alchemy_stock.recorder.prepare import ForecastBook, fins_rows  # noqa: E402
+from alchemy_stock.recorder import store  # noqa: E402
 from alchemy_stock.recorder.store import DayLog, now_jst  # noqa: E402
 from alchemy_stock.recorder.window49 import WANT  # noqa: E402
 from recorder_prepare import load_fins  # noqa: E402
@@ -113,15 +113,14 @@ def check_exits(prep: dict, log: DayLog, bars: pd.DataFrame, pos: Positions) -> 
     print(f"手放した建玉 {n}件に J-Quants の値段を足した")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--day", type=date.fromisoformat, default=now_jst().date())
-    a = p.parse_args()
-    path = ROOT / "data/recorder/prep" / f"{a.day.isoformat()}.json"
-    if not path.exists():
-        print(f"{path} が無い")
+    a = p.parse_args(argv)
+    prep = store.read_json(f"prep/{a.day.isoformat()}.json")
+    if prep is None:
+        print(f"prep/{a.day}.json が無い")
         return 1
-    prep = json.loads(path.read_text())
     jq = make_session(load_api_key(ROOT / ".env"), min_interval=1.0)
     bars = pd.DataFrame(get_all(jq, "/equities/bars/daily", date=a.day.isoformat()))
     if bars.empty:
@@ -129,7 +128,7 @@ def main() -> int:
         return 1
     for col in ("O", "C", "AdjFactor"):
         bars[col] = pd.to_numeric(bars[col], errors="coerce")
-    log, pos = DayLog(a.day, ROOT / "data/recorder"), Positions(ROOT / "data/recorder/positions.json")
+    log, pos = DayLog(a.day), Positions()
     prev_day = date.fromisoformat(prep["prev_day"])
     disc = morning.tdnet_rows([d for d in pd.date_range(prev_day, a.day).date])
     check_54(prep, log, bars, disc)
@@ -137,11 +136,10 @@ def main() -> int:
     check_49_events(prep, log, jq)
     check_exits(prep, log, bars, pos)
     # 前の取引日の 49 は、その日の財務情報が出た今なら突き合わせられる (まだなら)
-    pp = ROOT / "data/recorder/prep" / f"{prev_day.isoformat()}.json"
-    plog = DayLog(prev_day, ROOT / "data/recorder")
-    if pp.exists() and plog.read("run") and not any(r.get("kind") == "判定" for r in plog.read("reconcile")):
+    pprep, plog = store.read_json(f"prep/{prev_day.isoformat()}.json"), DayLog(prev_day)
+    if pprep and plog.read("window") and not any(r.get("kind") == "判定" for r in plog.read("reconcile")):
         print(f"(前の取引日 {prev_day})")
-        check_49_events(json.loads(pp.read_text()), plog, jq)
+        check_49_events(pprep, plog, jq)
     return 0
 
 

@@ -17,6 +17,11 @@ BASE = "https://api.jquants.com/v2"
 
 
 def load_api_key(env: Path = Path(".env")) -> str:
+    """環境変数 JQUANTS_API_KEY (Cloud Run では Secret Manager から入る) か、.env から読む。"""
+    import os
+
+    if os.environ.get("JQUANTS_API_KEY"):
+        return os.environ["JQUANTS_API_KEY"]
     for line in env.read_text(encoding="utf-8").splitlines():
         if line.startswith("JQUANTS_API_KEY="):
             return line.split("=", 1)[1].strip().strip("\"'")

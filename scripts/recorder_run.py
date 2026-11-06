@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import time
 from datetime import date, datetime, timedelta
@@ -24,6 +23,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from alchemy_stock.recorder import morning, rules  # noqa: E402
 from alchemy_stock.recorder.positions import Positions  # noqa: E402
 from alchemy_stock.recorder.saxo_read import SaxoReader  # noqa: E402
+from alchemy_stock.recorder import store  # noqa: E402
 from alchemy_stock.recorder.store import JST, DayLog, now_jst  # noqa: E402
 from alchemy_stock.recorder.tdnet_live import ListWatcher, marks_49, watch_window  # noqa: E402
 from alchemy_stock.recorder.window49 import Window49, load_book  # noqa: E402
@@ -43,16 +43,15 @@ def main() -> int:
     p.add_argument("--no-saxo", action="store_true")
     a = p.parse_args()
 
-    path = ROOT / "data/recorder/prep" / f"{a.day.isoformat()}.json"
-    if not path.exists():
-        print(f"{path} が無い。先に scripts/recorder_prepare.py --day {a.day} を動かす")
+    prep = store.read_json(f"prep/{a.day.isoformat()}.json")
+    if prep is None:
+        print(f"prep/{a.day}.json が無い。先に scripts/recorder_prepare.py --day {a.day} を動かす")
         return 1
-    prep = json.loads(path.read_text())
     cal = [date.fromisoformat(d) for d in prep["calendar"]]
     if a.day not in cal:
         print(f"{a.day} は取引日ではない")
         return 1
-    log, pos = DayLog(a.day, ROOT / "data/recorder"), Positions(ROOT / "data/recorder/positions.json")
+    log, pos = DayLog(a.day), Positions()
     saxo = None if a.no_saxo else SaxoReader()
     log.write("run", {"event": "start", "prep_made_at": prep["made_at"], "universe": len(prep["universe"])})
 
